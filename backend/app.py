@@ -1,10 +1,8 @@
 # ==============================================================================
-# Lex Veritas - Backend Server (Flask) - v2.1 (Stable & Secure)
+# Lex Veritas - Backend Server (Flask) - v2.5 (Dynamic Case Handling)
 # ==============================================================================
-# This backend manages case sessions using TinyDB for storage
-# and interacts with the Gemini AI (1.5 Flash - latest).
+# Supports live addition of evidence/documents into ongoing case sessions.
 # ==============================================================================
-
 import os
 import uuid
 from flask import Flask, request, jsonify
@@ -22,12 +20,11 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 # --- Gemini AI Configuration ---
 try:
-    api_key ="AIzaSyBL6qxhLsec0HOjnHyxaVjbvXclTD_vrvE"
+    api_key = "AIzaSyDvKUC2cute0KtjZaz1aD5i3BB5Wu9rmWI"
     if not api_key:
         raise ValueError("GEMINI_API_KEY not found in .env file.")
 
     genai.configure(api_key=api_key)
-    # ✅ Correct model name
     model = genai.GenerativeModel('gemini-2.5-flash')
     print("✅ Gemini AI Model configured successfully.")
 
@@ -35,7 +32,7 @@ except Exception as e:
     print(f"❌ Error configuring Gemini AI: {e}")
     model = None
 
-# --- Database Setup (TinyDB for stable storage) ---
+# --- Database Setup ---
 db = TinyDB('sessions.json')
 Session = Query()
 print(f"📁 Database loaded. Contains {len(db)} sessions.")
@@ -55,7 +52,6 @@ def get_ai_response(session_data, user_text):
     if not model:
         return "Error: AI model is not configured. Please check your API key."
 
-    # Define AI persona based on user role
     role_lower = session_data['role'].lower()
     if 'defense' in role_lower or 'defence' in role_lower:
         ai_persona = (
@@ -68,7 +64,7 @@ def get_ai_response(session_data, user_text):
             "Your goal is to create reasonable doubt and defend your client under Indian law."
         )
 
-    # Judge verdict command
+    # Judge verdict trigger
     if user_text.strip().lower() == '/judge':
         instruction = (
             "You are now the Judge. Render a concise verdict based ONLY on the provided case file "
@@ -115,9 +111,11 @@ def start_case():
         'session_id': session_id,
         'role': payload.get('role', 'Defense Counsel'),
         'objective': payload.get('objective', ''),
+        'documents': payload.get('documents', {}),
         'case_summary': case_summary,
         'chat_history': "The debate has started.",
-        'rounds': []
+        'rounds': [],
+        'evidence_log': []
     }
 
     db.insert(session_data)
@@ -126,6 +124,39 @@ def start_case():
         'session_id': session_id,
         'message': 'Case started successfully.',
         'case_summary_preview': case_summary[:400] + "..."
+    })
+
+
+@app.route('/add_evidence', methods=['POST'])
+def add_evidence():
+    """Adds new evidence or documents to an existing case session."""
+    payload = request.json
+    session_id = payload.get('session_id')
+    doc_name = payload.get('document_name')
+    doc_content = payload.get('document_content')
+
+    if not all([session_id, doc_name, doc_content]):
+        return jsonify({'error': 'Missing session_id, document_name, or document_content.'}), 400
+
+    session_list = db.search(Session.session_id == session_id)
+    if not session_list:
+        return jsonify({'error': 'Session not found. Please start a new case.'}), 404
+
+    sess = session_list[0]
+
+    # Update the session with the new evidence
+    sess['documents'][doc_name] = doc_content
+    sess['evidence_log'].append({'name': doc_name, 'content': doc_content})
+
+    # Rebuild case summary
+    sess['case_summary'] = build_case_summary(sess['documents'])
+
+    db.update(sess, Session.session_id == session_id)
+
+    return jsonify({
+        'message': f'New evidence "{doc_name}" added successfully.',
+        'updated_case_summary_preview': sess['case_summary'][:400] + "...",
+        'total_documents': len(sess['documents'])
     })
 
 

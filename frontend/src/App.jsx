@@ -173,7 +173,7 @@ const CourtroomScreen = ({ messages, userInput, setUserInput, handleSendMessage,
                 color: msg.who === 'ai' ? '#050505' : 'white',
                 padding: '10px 15px',
                 borderRadius: '15px',
-                maxWidth: '70%',
+                maxWidth: '100%',
                 whiteSpace: 'pre-wrap',
                 lineHeight: '1.6',
               }}
